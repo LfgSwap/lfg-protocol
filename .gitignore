@@ -1,0 +1,17 @@
+node_modules
+
+#Hardhat files
+cache
+artifacts
+**/build
+**/.DS_Store
+.env.local
+.env
+yarn-error.log
+
+.DS_Store
+
+**/bin
+**/java
+config/
+migrations/*
