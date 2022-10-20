@@ -6,13 +6,13 @@ import "@openzeppelin/contracts/utils/EnumerableSet.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract LfgToken is ERC20, Ownable {
-    uint256 private constant preMineSupply = 20000000 * 1e18;
+    // uint256 private constant preMineSupply = 20000000 * 1e18;
 
     using EnumerableSet for EnumerableSet.AddressSet;
     EnumerableSet.AddressSet private _minters;
 
     constructor() public ERC20("LfgSwap Finance Token", "LFG"){
-        _mint(msg.sender, preMineSupply);
+        // _mint(msg.sender, preMineSupply);
     }
 
     // mint with max supply
@@ -51,4 +51,3 @@ contract LfgToken is ERC20, Ownable {
     }
 
 }
-
