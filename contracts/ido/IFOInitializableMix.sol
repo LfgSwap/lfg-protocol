@@ -10,7 +10,6 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 
 import "./interfaces/ILfgProfile.sol";
-
 import "./ICake.sol";
 /**
  * @title IFOInitializableBase
@@ -20,7 +19,7 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
 
-    uint256 public REWARD_DURATION = 1;
+    uint256 public constant REWARD_DURATION = 30;
 
     address public WETH;
     // The address of the smart chef factory
@@ -160,8 +159,11 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
         uint256 _floorAmountReferralInvest,
         uint256 _referralRewardScale, // based 10000 , 10 means 0.1%
         uint256 _investRewardScale,   // based 10000
+        uint256 _referralRewardAmount,
         bool    _enableReferral
     ) public onlyOwner {
+
+        totalRewardOffered = _referralRewardAmount;
 
         floorAmountReferralTicket = _floorAmountReferralTicket;
         floorAmountReferralInvest = _floorAmountReferralInvest;
@@ -185,9 +187,10 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
      * @notice It allows users to harvest from pool
      */
     function harvestPool() external nonReentrant notContract {
+
         // Checks whether it is too early to harvest
         require(block.timestamp > endAt, "Harvest: Too early");
-
+        
         beforeHarvest(msg.sender);
         updatePool();
 
@@ -219,9 +222,8 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
         }
 
         if(enableStakeMint) {
-            uint256 stakeAmount = user.pending.add( 
-                user.amount.mul(accRewardPerShare).div(1e12).sub(user.debt)
-            );
+
+            uint256 stakeAmount = pendingReward(msg.sender);
             user.pending = stakeAmount;
             user.debt = stakeAmount;
             //withdraw pending
@@ -248,6 +250,8 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
                 accRewardPerShare = accRewardPerShare.add(
                     reward.mul(1e12).div(totalAmountStake)
                 );
+
+                lastRewardAt = currentRound;
             }
         }
     }
@@ -263,11 +267,15 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
             "Deposit: Pool not set"
         );
         // Checks whether the block number is not too early
-        require(block.timestamp > startAt, "Deposit: Too early");
+        require(block.timestamp >= startAt, "Deposit: Too early");
         // Checks whether the block number is not too late
-        require(block.timestamp < endAt, "Deposit: Too late");
+        require(block.timestamp <= endAt, "Deposit: Too late");
         // Checks that the amount deposited is not inferior to 0
         require(_amount > 0, "Deposit: Amount must be > 0");
+        require(
+                _amount <= getUserCredit(account),
+                "Deposit: New amount above user limit"
+        );
         updatePool();
         UserInfo storage user = userInfo[account];
         // isSpecialSale ignore
@@ -275,26 +283,21 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
             uint256 ifoCredit = getUserCredit(account);
             require(user.amount.add(_amount) <= ifoCredit, "Not enough IFO credit left");
         }
-        // Update the user status
-        user.amount = user.amount.add(_amount);
-
-        // Check if the pool has a limit per user
-        if (limitPerUserInLP > 0) {
-            // Checks whether the limit has been reached
-            require(
-                user.amount <= limitPerUserInLP,
-                "Deposit: New amount above user limit"
-            );
-            require(
-                user.amount >= floorLimitPerUserInLP,
-                "Deposit: New amount less user min limit"
-            );
-        }
         if(enableStakeMint && user.amount > 0) {
             user.pending = user.pending.add( 
                 user.amount.mul(accRewardPerShare).div(1e12).sub(user.debt)
             );
         }
+        // Update the user status
+        user.amount = user.amount.add(_amount);
+        // Check if the pool has a limit per user
+        if (limitPerUserInLP > 0) {
+            require(
+                user.amount >= floorLimitPerUserInLP,
+                "Deposit: New amount less user min limit"
+            );
+        }
+        
         // Updates the totalAmount for pool
         totalAmountStake = totalAmountStake.add(_amount);
         // update debt
@@ -362,18 +365,22 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
        uint256 point = referralPoint[user];
         if(point > 0 && totalRewardPoint > 0 ) {
             //expect data
-            uint256 offering = offeringAmountPool;
-            uint256 raising = raisingAmountPool;
-            // actual raising
-            uint256 totalRaise = totalAmountStake;
+            uint256 offering = totalRewardOffered;
 
-            rewardAmount = totalRaise > raising ? point.mul(offering).div(totalRaise) : point.mul(offering).div(raising) ;
+            rewardAmount = point.mul(offering).div(totalRewardPoint);
         } 
+    }
+
+    function setReferralReward(uint256 _referralRewardAmount) external onlyOwner {
+        totalRewardOffered = _referralRewardAmount;
     }
 
     function getUserCredit(address user) public view returns (uint256) {
         if(address(iLfg) == address(0)) {
             uint256 _limitPerUserInLP = limitPerUserInLP;
+            if(referralCount[user] >= 5) {
+                _limitPerUserInLP = _limitPerUserInLP * 2;
+            }
             uint256 amount = userInfo[user].amount;
             if(_limitPerUserInLP <= amount) {
                 return 0;
@@ -503,10 +510,10 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
 
     function viewUserInfo(address account) public view returns (
         uint256 amount,
-        uint256 userReferralPoint,
-        uint256 userReferralRewardAmount,
         uint256 userStakeReward,
         uint256 userCredit,
+        uint256 offeringTokenAmount,
+        uint256 refundingTokenAmount,
         bool    userClaimed
     ) {
         UserInfo storage user = userInfo[account];
@@ -519,15 +526,10 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
         return (
             // deposit Amount
             user.amount,
-            // deposit able amount
-            // referralAmount
-            referralPoint[account],
-            // referralReward
-            userReferralReward(account),
-            // mintReward
             pendingReward(account),
-            // _offeringTokenAmount,
             getUserCredit(account),
+            _offeringTokenAmount,
+            _refundingTokenAmount,
             user.claimed
         );
     }
@@ -537,7 +539,7 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
     }
 
     function pendingReward(address _user) public view returns(uint256) {
-        if(enableStakeMint) {
+        if(!enableStakeMint) {
             return 0;
         }
         UserInfo storage user = userInfo[_user];
@@ -553,7 +555,12 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
                 reward.mul(1e12).div(totalAmountStake)
             );
         }
-        return user.amount.mul(accPerShare).div(1e12).sub(user.debt);
+
+        return user.amount.mul(accPerShare).div(1e12).sub(user.debt).add(user.pending);
+    }
+
+    function getCurrentRound() public view returns (uint256) {
+        return block.timestamp > endAt ? endAt / REWARD_DURATION : block.timestamp / REWARD_DURATION;
     }
 
     function userReferralInfo(address user) 
@@ -564,7 +571,8 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
             address _referralBy,
             uint256 _referralCount,
             uint256 _rewardPoint,
-            uint256 rewardOfferTokenAmount
+            uint256 rewardOfferTokenAmount,
+            address[] memory leaf
         ) { 
         _referralAble = referralAble[user];
         _referralBy = referralBy[user];
@@ -577,6 +585,8 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
                 rewardOfferTokenAmount = _rewardPoint.mul(totalRewardOffered).div(totalRewardPoint);
             }
         }
+
+        leaf = referralLeaf[user];
     }
 
     /**
