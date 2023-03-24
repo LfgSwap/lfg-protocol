@@ -86,7 +86,11 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
     uint256 public lastRewardAt;
     address public stakeRewardToken;
     bool    public enableStakeMint;
+
+    uint256    public totalReferralClaimed;
     /** Referral END  */
+
+    uint256[18] __gap;
 
     // Admin withdraw events
     event AdminWithdraw(uint256 amountLP, uint256 amountOfferingToken);
@@ -137,6 +141,8 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
         __Ownable_init();
         __ReentrancyGuard_init();
 
+        require(_endAt > block.timestamp, "IFO ends too early");
+
         IFO_FACTORY = msg.sender;
         WETH = _WETH;
 
@@ -183,6 +189,7 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
         enableStakeMint = true;
     }
 
+    
     /**
      * @notice It allows users to harvest from pool
      */
@@ -224,8 +231,8 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
         if(enableStakeMint) {
 
             uint256 stakeAmount = pendingReward(msg.sender);
-            user.pending = stakeAmount;
-            user.debt = stakeAmount;
+            // user.pending = stakeAmount;
+            // user.debt = user.amount.mul(accRewardPerShare).div(1e12);
             //withdraw pending
             IERC20(stakeRewardToken).safeTransfer(msg.sender, stakeAmount);
         }
@@ -356,6 +363,7 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
 
         uint256 rewardAmount = userReferralReward(user);
         if(rewardAmount > 0) {
+            totalReferralClaimed = totalReferralClaimed.add(rewardAmount);
             offeringToken.safeTransfer(user, rewardAmount);
             emit HarvestReferralReward(user, rewardAmount);
         }
@@ -475,6 +483,10 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
 
     function setOfferingToken(address _offeringToken) external onlyOwner {
          offeringToken = IERC20(_offeringToken);
+    }
+
+    function setStakeRewardToken(address _stakeRewardToken) external onlyOwner {
+         stakeRewardToken = _stakeRewardToken;
     }
 
     /**
