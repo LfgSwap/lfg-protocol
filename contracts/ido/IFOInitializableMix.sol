@@ -364,6 +364,9 @@ abstract contract IFOInitializableMix is ReentrancyGuardUpgradeable, OwnableUpgr
         uint256 rewardAmount = userReferralReward(user);
         if(rewardAmount > 0) {
             totalReferralClaimed = totalReferralClaimed.add(rewardAmount);
+
+            require(totalReferralClaimed <= totalRewardOffered, "IFO: totalReferralClaimed over totalRewardOffered");
+            
             offeringToken.safeTransfer(user, rewardAmount);
             emit HarvestReferralReward(user, rewardAmount);
         }
